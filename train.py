@@ -43,23 +43,6 @@ def encode_emphysema_extent(extent):
     else:
         return np.nan
 
-
-original_df = pd.read_csv(basedir+'Reget_emphy_scores.csv',index_col=0) 
-# the file with extracted emphysema scores
-# my dataframe have 7 columns: accession number, and the emphysema scores from 6 different kernels
-original_df['accession number']=original_df['accession number'].astype('int')
-emphysema_df = pd.read_csv(basedir+'All_Patients_Extracted_Data.csv', index_col=0) # the file with emphysema extent
-emphysema_df.index = emphysema_df['Accession Number'].to_list()
-original_df['doctor note'] = emphysema_df.loc[original_df['accession number'].tolist(),'Emphysema Extent'].map(combine_emphysema_cats).tolist()
-original_df['encoded extent (doctor)'] = original_df['doctor note'].map(encode_emphysema_extent).tolist()
-
-
-
-filtered = original_df['doctor note']!='Not specified'
-training_df = original_df.loc[filtered,:]
-
-
-
 def convert_df_to_lists(meta_df, score_col_indices):
     dfs = []
     non_score_col_indices = list(set(range(len(meta_df.columns)))-set(score_col_indices))
@@ -132,11 +115,9 @@ def train(transition_type, df):
         y[boolean] = 1
         y[~boolean] = 0
 
-    
         all_probs = []
         all_aucs = []
         all_cutoffs = []
-    
         
         clf = LogisticRegression(random_state=i, C=1, class_weight='balanced')
         sample_num_0 = np.sum(y == 0)
@@ -151,26 +132,18 @@ def train(transition_type, df):
         fpr, tpr, thresholds = roc_curve(y_score=probs[:,1], y_true=y)
         se = tpr
         sp = 1-fpr
-            
         roc_auc = auc(fpr, tpr)
         all_aucs.append(roc_auc)
-            
         idx = np.where(tpr-fpr==(tpr-fpr).max())[0][-1] #youden index
         thres = thresholds[idx]
-           
         score_cutoff = (np.log((1-thres)/thres)-b)/k # convert from prob cutoff to score cutoff
         all_cutoffs.append(score_cutoff)
-        
-
         return [fpr, tpr, thresholds, roc_auc], roc_auc, all_probs, all_cutoffs
     
-
     
     roc_params, roc_auc, all_probs, cutoffs = one_repeat(0)
  
     return roc_params, roc_auc, cutoffs
-
-
 
 def get_cutoffs_and_aucs(df):
     
@@ -248,83 +221,85 @@ def get_stat_infos(dfs, repeats=10):
                 stat_analysis_infos[k][j][i]['final cutoffs'] = np.mean(np.array(stat_analysis_infos[k][j][i]['cutoffs']),axis=0)
     return stat_analysis_infos
 
+if __name__ == "__main__":
 
-# train and get results stored in `stat_analysis_infos  `
-raw_dfs = convert_df_to_lists(training_df, score_col_indices = list(range(1,8)))
-stat_analysis_infos = get_stat_infos(raw_dfs)
+    original_df = pd.read_csv(basedir+'Reget_emphy_scores.csv',index_col=0) 
+    # the file with extracted emphysema scores
+    # my dataframe have 7 columns: accession number, and the emphysema scores from 6 different kernels
+    original_df['accession number']=original_df['accession number'].astype('int')
+    emphysema_df = pd.read_csv(basedir+'All_Patients_Extracted_Data.csv', index_col=0) # the file with emphysema extent
+    emphysema_df.index = emphysema_df['Accession Number'].to_list()
+    original_df['doctor note'] = emphysema_df.loc[original_df['accession number'].tolist(),'Emphysema Extent'].map(combine_emphysema_cats).tolist()
+    original_df['encoded extent (doctor)'] = original_df['doctor note'].map(encode_emphysema_extent).tolist()
+    filtered = original_df['doctor note']!='Not specified'
+    training_df = original_df.loc[filtered,:]
 
+    # train and get results stored in `stat_analysis_infos  `
+    raw_dfs = convert_df_to_lists(training_df, score_col_indices = list(range(1,8)))
+    stat_analysis_infos = get_stat_infos(raw_dfs)
 
-list_of_patches = ['3D ps=1', '3D ps=3', '3D ps=5', 
-                   '2D ps=3', '2D ps=5', '2D ps=7']
-colors = ['red', 'orange', 'brown','blue','green','purple']
+    list_of_patches = ['3D ps=1', '3D ps=3', '3D ps=5', 
+                    '2D ps=3', '2D ps=5', '2D ps=7']
 
+    aucs= {i:np.vstack([np.array(stat_analysis_infos['no outlier'][j][i]['all aucs']) for j in range(10)]) for i in range(6)}
+    # your final aucs
 
+    AUC_col_names = [
+                    'AUC mean (cat1)', 
+                    'AUC SD (cat1)',
+                    'AUC mean (cat2)', 
+                    'AUC SD (cat2)']
+    AUC_dict = {list_of_patches[i]:{AUC_col_names[j]:0 for j in range(4)} for i in range(7)}
+    for j in range(2):
+        for i in range(7):
+            data = aucs[i][:,j]
+            AUC_dict[list_of_patches[i]][AUC_col_names[j*2]] = float(np.mean(data))
+            #print(AUC_dict)
+            AUC_dict[list_of_patches[i]][AUC_col_names[j*2+1]] = float(np.std(data))
+    pd.DataFrame(AUC_dict).round(3).to_csv(savedir+'AUC distributions.csv') # your AUC distributions  
 
+    final_stats = {i:np.zeros((4)) for i in range(7)}
+    final_stats_std = {i:np.zeros((4)) for i in range(7)}
+    conf_mats = {i:[] for i in range(7)}
 
-aucs= {i:np.vstack([np.array(stat_analysis_infos['no outlier'][j][i]['all aucs']) for j in range(10)]) for i in range(6)}
-# your final aucs
+    for i in range(6):
+        print(list_of_patches[i])
+        final_stats_i = []
+        for j in range(10):
+            X_tests = []
+            for k in range(5):
+                X_test = stat_analysis_infos['no outlier'][j][i]['X_test'][k] 
+                X_test = pred_X_test(stat_analysis_infos['no outlier'][j][i]['cutoffs'][k], X_test)
+                X_tests.append(X_test)
+            X_test = pd.concat(X_tests)
+            X_test, conf_mat, stats = evaluate_X_test(X_test)
+        
+            label = X_test['encoded extent (doctor)'].astype('int').tolist()
+            pred = X_test['encoded extent (re-predicted)'].astype('int').tolist()
+            final_stats_i.append(np.array(stats))
+            conf_mats[i].append(conf_mat)
+        conf_mat = conf_mats[i][0]
+        for j in range(1,10):
+            conf_mat += conf_mats[i][j]
+        conf_mats[i] = conf_mat / 10 # average of the confusion matrix of 10 train-test repeats
+        final_stats_i = np.array(final_stats_i)
+        final_stats[i] = np.mean(final_stats_i, axis=0)
+        final_stats_std[i] = np.std(final_stats_i, axis=0)
+        
 
-AUC_col_names = [
-                'AUC mean (cat1)', 
-                'AUC SD (cat1)',
-                'AUC mean (cat2)', 
-                'AUC SD (cat2)']
-AUC_dict = {list_of_patches[i]:{AUC_col_names[j]:0 for j in range(4)} for i in range(7)}
-for j in range(2):
-    for i in range(7):
-        data = aucs[i][:,j]
-        AUC_dict[list_of_patches[i]][AUC_col_names[j*2]] = float(np.mean(data))
-        #print(AUC_dict)
-        AUC_dict[list_of_patches[i]][AUC_col_names[j*2+1]] = float(np.std(data))
-pd.DataFrame(AUC_dict).round(3).to_csv(savedir+'AUC distributions.csv')   
+    final_stats = pd.DataFrame(final_stats).round(3).rename(columns = {i:list_of_patches[i] for i in range(7)},
+                                                index = {
+                                                        0:'mean difference',
+                                                        1:'multiclass accuracy',
+                                                        2:'multiclass F score',
+                                                        3:'multiclass kappa score'}) # your final stats
+    final_stats_std = pd.DataFrame(final_stats_std).round(3).rename(columns = {i:list_of_patches[i] for i in range(7)},
+                                                index = {
+                                                        0:'mean difference',
+                                                        1:'multiclass accuracy',
+                                                        2:'multiclass F score',
+                                                        3:'multiclass kappa score'}) # the standard deviation of your stats
 
-
-
-final_stats = {i:np.zeros((4)) for i in range(7)}
-final_stats_std = {i:np.zeros((4)) for i in range(7)}
-conf_mats = {i:[] for i in range(7)}
-
-for i in range(6):
-    print(list_of_patches[i])
-    final_stats_i = []
-    for j in range(10):
-        X_tests = []
-        for k in range(5):
-            X_test = stat_analysis_infos['no outlier'][j][i]['X_test'][k] 
-            X_test = pred_X_test(stat_analysis_infos['no outlier'][j][i]['cutoffs'][k], X_test)
-            X_tests.append(X_test)
-        X_test = pd.concat(X_tests)
-        X_test, conf_mat, stats = evaluate_X_test(X_test)
-    
-        label = X_test['encoded extent (doctor)'].astype('int').tolist()
-        pred = X_test['encoded extent (re-predicted)'].astype('int').tolist()
-        final_stats_i.append(np.array(stats))
-        conf_mats[i].append(conf_mat)
-    conf_mat = conf_mats[i][0]
-    for j in range(1,10):
-        conf_mat += conf_mats[i][j]
-    conf_mats[i] = conf_mat / 10 # average of the confusion matrix of 10 train-test repeats
-    final_stats_i = np.array(final_stats_i)
-    final_stats[i] = np.mean(final_stats_i, axis=0)
-    final_stats_std[i] = np.std(final_stats_i, axis=0)
-    
-
-final_stats = pd.DataFrame(final_stats).round(3).rename(columns = {i:list_of_patches[i] for i in range(7)},
-                                              index = {
-                                                      0:'mean difference',
-                                                      1:'multiclass accuracy',
-                                                      2:'multiclass F score',
-                                                      3:'multiclass kappa score'}) # your final stats
-final_stats_std = pd.DataFrame(final_stats_std).round(3).rename(columns = {i:list_of_patches[i] for i in range(7)},
-                                              index = {
-                                                      0:'mean difference',
-                                                      1:'multiclass accuracy',
-                                                      2:'multiclass F score',
-                                                      3:'multiclass kappa score'}) # the standard deviation of your stats
-
-final_stats.to_csv(savedir+'final_stats.csv')
-final_stats
-
-
-d = {list_of_patches[i]:conf_mats[i] for i in range(6)}
-all_conf_mats = pd.concat(d.values(), axis=1, keys=d.keys()) # your final confusion matrix
+    final_stats.to_csv(savedir+'final_stats.csv') 
+    d = {list_of_patches[i]:conf_mats[i] for i in range(6)}
+    all_conf_mats = pd.concat(d.values(), axis=1, keys=d.keys()) # your final confusion matrix
