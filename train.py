@@ -11,6 +11,7 @@ from sklearn.model_selection import StratifiedKFold
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import RocCurveDisplay, auc, roc_curve, confusion_matrix, roc_auc_score
 import statsmodels.api as sm
+import matplotlib.ticker as mtick
 import scipy
 from sklearn.metrics import cohen_kappa_score as kappa
 from sklearn.metrics import f1_score, confusion_matrix
@@ -231,6 +232,8 @@ if __name__ == "__main__":
     emphysema_df.index = emphysema_df['Accession Number'].to_list()
     original_df['doctor note'] = emphysema_df.loc[original_df['accession number'].tolist(),'Emphysema Extent'].map(combine_emphysema_cats).tolist()
     original_df['encoded extent (doctor)'] = original_df['doctor note'].map(encode_emphysema_extent).tolist()
+    for i in range(1,7):
+        original_df.iloc[:,i] = np.cbrt(original_df.iloc[:,i]) # cubic root transformation
     filtered = original_df['doctor note']!='Not specified'
     training_df = original_df.loc[filtered,:]
 
