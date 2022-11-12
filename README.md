@@ -1,6 +1,8 @@
 # Emphysema_Quantification
+# Accompanies "Emphysema Quantification and Severity Classification with 3-Dimensional Averaging Kernel and Airways Removal" on medRxiv; DOI: https://doi.org/10.1101/2022.10.31.22281562
 
 This repository provides a pipeline for accurately quantifying emphysema score from chest CT scans.
+
 
 See `requirements.txt` for required packages.
 
